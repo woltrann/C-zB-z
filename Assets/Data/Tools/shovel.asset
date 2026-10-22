@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7d3dfa1a53b92ff4f881257d4c5afb68, type: 3}
+  m_Name: shovel
+  m_EditorClassIdentifier: 
+  itemID: shovel
+  itemName: "K\xFCrek"
+  icon: {fileID: 21300000, guid: 0d9842191ce499044a1969adf42ac852, type: 3}
+  itemType: 1
+  maxStack: 1
+  toolType: 3
+  handPrefab: {fileID: 4993559892691306893, guid: 2de9f77a7c8e65d46a10cc8002680001, type: 3}
