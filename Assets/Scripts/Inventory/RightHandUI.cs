@@ -1,4 +1,3 @@
-
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -9,9 +8,6 @@ public class RightHandUI : MonoBehaviour
 
     [Header("Right Hand")]
     [SerializeField] private Image equippedItemIcon;
-
-    [Header("Belt")]
-    [SerializeField] private Image beltSlot1Icon;
 
     private void OnEnable()
     {
@@ -29,28 +25,16 @@ public class RightHandUI : MonoBehaviour
 
     private void RefreshUI()
     {
-        if (toolController == null)
+        if (equippedItemIcon == null)
             return;
 
-        // Sað el ikonunu güncelle.
-        UpdateIcon(equippedItemIcon, toolController.CurrentItem);
-
-        // Kemer ikonunu güncelle.
-        UpdateIcon(beltSlot1Icon, toolController.BeltItem);
-    }
-
-    private void UpdateIcon(Image image, ItemData item)
-    {
-        if (image == null)
-            return;
+        ItemData item = toolController != null
+            ? toolController.CurrentItem
+            : null;
 
         bool hasItem = item != null && item.Icon != null;
 
-        image.enabled = hasItem;
-
-        if (hasItem)
-            image.sprite = item.Icon;
-        else
-            image.sprite = null;
+        equippedItemIcon.enabled = hasItem;
+        equippedItemIcon.sprite = hasItem ? item.Icon : null;
     }
 }

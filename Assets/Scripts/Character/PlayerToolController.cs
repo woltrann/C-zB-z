@@ -1,3 +1,4 @@
+
 using UnityEngine;
 
 public class PlayerToolController : MonoBehaviour
@@ -16,20 +17,15 @@ public class PlayerToolController : MonoBehaviour
     [SerializeField] private Transform beltSocket2;
     [SerializeField] private Transform beltSocket3;
 
-
     public System.Action OnRightHandChanged;
 
-    public ItemData CurrentItem =>
-        currentWorldItem != null
-            ? currentWorldItem.Item
-            : null;
-
-    private GameObject currentHandObject;
     private WorldItem currentWorldItem;
-    private WorldItem beltWorldItem;
-    private WorldItem[] beltItems = new WorldItem[3];
+
+    private readonly WorldItem[] beltItems = new WorldItem[3];
     private Transform[] beltSockets;
 
+    // TAB ile sýradaki kemer yuvasýný takip eder.
+    private int nextBeltSlotIndex;
 
     public ToolType CurrentTool => currentTool;
 
@@ -37,32 +33,62 @@ public class PlayerToolController : MonoBehaviour
 
     public int BeltSlotCount =>
         equippedBelt != null
-            ? equippedBelt.SlotCount
+            ? Mathf.Clamp(equippedBelt.SlotCount, 0, beltItems.Length)
             : 0;
 
-    public ItemData BeltItem =>
-    beltWorldItem != null
-        ? beltWorldItem.Item
-        : null;
+    public ItemData CurrentItem =>
+        currentWorldItem != null
+            ? currentWorldItem.Item
+            : null;
 
+    // Eski RightHandUI ile uyumluluk.
+    public ItemData BeltItem => GetBeltItem(0);
+
+    // Yeni çoklu slot UI sistemi için.
+    public ItemData GetBeltItem(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= BeltSlotCount)
+            return null;
+
+        WorldItem worldItem = beltItems[slotIndex];
+
+        return worldItem != null
+            ? worldItem.Item
+            : null;
+    }
+
+    private void Awake()
+    {
+        beltSockets = new Transform[]
+        {
+            beltSocket1,
+            beltSocket2,
+            beltSocket3
+        };
+    }
+
+    private void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.G))
+        {
+            DropCurrentTool();
+        }
+
+        if (Input.GetKeyDown(KeyCode.Tab))
+        {
+            SwapHandAndBelt();
+        }
+    }
 
     public bool HasTool(ToolType requiredTool)
     {
         return currentTool == requiredTool;
     }
 
-
     public bool EquipWorldItem(WorldItem worldItem)
     {
         if (worldItem == null || rightHandSocket == null)
-        {
-            Debug.LogWarning(
-                "Alet takýlamadý: WorldItem veya RightHandSocket eksik.",
-                this
-            );
-
             return false;
-        }
 
         ItemData itemData = worldItem.Item;
 
@@ -79,87 +105,137 @@ public class PlayerToolController : MonoBehaviour
             return false;
         }
 
-        // El doluysa mevcut alet için yer aç.
+        // El doluysa eski aleti kemere taþýmayý dene.
         if (currentWorldItem != null)
         {
-            if (beltWorldItem == null && beltSocket1 != null)
+            int emptySlot = FindEmptyBeltSlot();
+
+            if (emptySlot >= 0)
             {
-                // Kemer boþ: eldeki aleti kemere taþý.
-                beltWorldItem = currentWorldItem;
-
-                beltWorldItem.transform.SetParent(beltSocket1);
-                beltWorldItem.transform.localPosition = Vector3.zero;
-                beltWorldItem.transform.localRotation = Quaternion.identity;
-
-                Collider[] beltColliders =
-                    beltWorldItem.GetComponentsInChildren<Collider>();
-
-                foreach (Collider col in beltColliders)
-                    col.enabled = false;
-
-                Outline[] beltOutlines =
-                    beltWorldItem.GetComponentsInChildren<Outline>();
-
-                foreach (Outline outline in beltOutlines)
-                    outline.enabled = false;
+                MoveItemToBelt(currentWorldItem, emptySlot);
 
                 currentWorldItem = null;
                 currentTool = ToolType.None;
             }
             else
             {
-                // Kemer dolu: eldeki aleti yere býrak.
+                // Kemer doluysa eldeki aleti býrak.
                 DropCurrentTool();
             }
         }
 
-        // Yeni aleti ele tak.
-        currentWorldItem = worldItem;
-        currentTool = itemData.ToolType;
-
-        currentWorldItem.transform.SetParent(rightHandSocket);
-        currentWorldItem.transform.localPosition = Vector3.zero;
-        currentWorldItem.transform.localRotation = Quaternion.identity;
-
-        Collider[] handColliders =
-            currentWorldItem.GetComponentsInChildren<Collider>();
-
-        foreach (Collider col in handColliders)
-            col.enabled = false;
-
-        Outline[] handOutlines =
-            currentWorldItem.GetComponentsInChildren<Outline>();
-
-        foreach (Outline outline in handOutlines)
-            outline.enabled = false;
-
-        Debug.Log("Sað ele takýldý: " + itemData.ItemName);
+        MoveItemToHand(worldItem);
 
         OnRightHandChanged?.Invoke();
+
+        Debug.Log("Sað ele takýldý: " + itemData.ItemName);
 
         return true;
     }
 
-    private void Awake()
+    private int FindEmptyBeltSlot()
     {
-        beltSockets = new Transform[]
+        for (int i = 0; i < BeltSlotCount; i++)
         {
-        beltSocket1,
-        beltSocket2,
-        beltSocket3
-        };
+            if (beltItems[i] == null && beltSockets[i] != null)
+                return i;
+        }
+
+        return -1;
     }
 
-    private void Update()
+    private void MoveItemToHand(WorldItem worldItem)
     {
-        if (Input.GetKeyDown(KeyCode.G))
+        if (worldItem == null)
+            return;
+
+        currentWorldItem = worldItem;
+        currentTool = worldItem.Item.ToolType;
+
+        AttachItem(worldItem, rightHandSocket);
+    }
+
+    private void MoveItemToBelt(WorldItem worldItem, int slotIndex)
+    {
+        if (worldItem == null)
+            return;
+
+        if (slotIndex < 0 || slotIndex >= BeltSlotCount)
+            return;
+
+        if (beltSockets[slotIndex] == null)
+            return;
+
+        beltItems[slotIndex] = worldItem;
+
+        AttachItem(worldItem, beltSockets[slotIndex]);
+    }
+
+    private void AttachItem(WorldItem worldItem, Transform socket)
+    {
+        if (worldItem == null || socket == null)
+            return;
+
+        worldItem.transform.SetParent(socket);
+        worldItem.transform.localPosition = Vector3.zero;
+        worldItem.transform.localRotation = Quaternion.identity;
+
+        foreach (Collider col in
+                 worldItem.GetComponentsInChildren<Collider>())
         {
-            DropCurrentTool();
+            col.enabled = false;
         }
-        if (Input.GetKeyDown(KeyCode.Tab))
+
+        foreach (Outline outline in
+                 worldItem.GetComponentsInChildren<Outline>())
         {
-            SwapHandAndBelt();
+            outline.enabled = false;
         }
+    }
+
+    private void SwapHandAndBelt()
+    {
+        int slotCount = BeltSlotCount;
+
+        if (slotCount == 0 || rightHandSocket == null)
+            return;
+
+        // Dolu bir kemer yuvasý bul.
+        int selectedSlot = -1;
+
+        for (int i = 0; i < slotCount; i++)
+        {
+            int index = (nextBeltSlotIndex + i) % slotCount;
+
+            if (beltItems[index] != null && beltSockets[index] != null)
+            {
+                selectedSlot = index;
+                break;
+            }
+        }
+
+        if (selectedSlot < 0)
+            return;
+
+        WorldItem oldHandItem = currentWorldItem;
+        WorldItem selectedBeltItem = beltItems[selectedSlot];
+
+        // Kemerdeki aleti ele taþý.
+        beltItems[selectedSlot] = null;
+        MoveItemToHand(selectedBeltItem);
+
+        // Eski el aletini boþalan kemer yuvasýna taþý.
+        if (oldHandItem != null)
+        {
+            MoveItemToBelt(oldHandItem, selectedSlot);
+        }
+
+        // Bir sonraki TAB baþka yuvadan devam etsin.
+        nextBeltSlotIndex = (selectedSlot + 1) % slotCount;
+
+        OnRightHandChanged?.Invoke();
+
+        Debug.Log("El ve kemer aletleri deðiþtirildi.");
     }
 
     public void DropCurrentTool()
@@ -173,16 +249,13 @@ public class PlayerToolController : MonoBehaviour
         WorldItem droppedItem = currentWorldItem;
         Transform itemTransform = droppedItem.transform;
 
-        // Karakterin elinden ayýr.
         itemTransform.SetParent(null);
 
-        // Aleti karakterin önüne yerleþtir.
         Vector3 origin =
             transform.position +
             transform.forward * 1.2f +
             Vector3.up * 2f;
 
-        // Zemini yukarýdan aþaðýya bul.
         RaycastHit hit;
 
         if (Physics.Raycast(
@@ -204,23 +277,24 @@ public class PlayerToolController : MonoBehaviour
                 Vector3.up * 0.5f;
         }
 
-        // Yerde tekrar seçilebilir olsun.
-        Collider[] colliders =
-            droppedItem.GetComponentsInChildren<Collider>();
-
-        foreach (Collider col in colliders)
+        foreach (Collider col in
+                 droppedItem.GetComponentsInChildren<Collider>())
+        {
             col.enabled = true;
+        }
 
-        Outline[] outlines =
-            droppedItem.GetComponentsInChildren<Outline>();
-
-        foreach (Outline outline in outlines)
+        foreach (Outline outline in
+                 droppedItem.GetComponentsInChildren<Outline>())
+        {
             outline.enabled = false;
+        }
 
         currentWorldItem = null;
         currentTool = ToolType.None;
+
         OnRightHandChanged?.Invoke();
     }
+
     public void EquipTool(ToolType tool)
     {
         currentTool = tool;
@@ -233,58 +307,62 @@ public class PlayerToolController : MonoBehaviour
     }
 
 
-    private void SwapHandAndBelt()
+
+
+    public bool UpgradeBelt(BeltData newBelt)
     {
-        // Kemer boþsa deðiþtirme yapma.
-        if (beltWorldItem == null || beltSocket1 == null)
-            return;
-
-        WorldItem oldHandItem = currentWorldItem;
-
-        // Kemer aletini ele al.
-        currentWorldItem = beltWorldItem;
-        currentTool = currentWorldItem.Item.ToolType;
-
-        currentWorldItem.transform.SetParent(rightHandSocket);
-        currentWorldItem.transform.localPosition = Vector3.zero;
-        currentWorldItem.transform.localRotation = Quaternion.identity;
-
-        // Önceki el aletini kemere gönder.
-        beltWorldItem = oldHandItem;
-
-        if (beltWorldItem != null)
+        if (newBelt == null)
         {
-            beltWorldItem.transform.SetParent(beltSocket1);
-            beltWorldItem.transform.localPosition = Vector3.zero;
-            beltWorldItem.transform.localRotation = Quaternion.identity;
-        }
-        else
-        {
-            currentWorldItem = currentWorldItem;
+            Debug.LogWarning("Yeni kemer verisi bulunamadý.");
+            return false;
         }
 
-        // Elde ve kemerdeki aletlerin collider'larý kapalý kalmalý.
-        if (currentWorldItem != null)
-        {
-            foreach (Collider col in currentWorldItem.GetComponentsInChildren<Collider>())
-                col.enabled = false;
+        int currentCapacity = BeltSlotCount;
+        int newCapacity = newBelt.SlotCount;
 
-            foreach (Outline outline in currentWorldItem.GetComponentsInChildren<Outline>())
-                outline.enabled = false;
+        // Sadece kapasite artýran yükseltmelere izin ver.
+        if (newCapacity <= currentCapacity)
+        {
+            Debug.LogWarning(
+                "Yeni kemerin kapasitesi mevcut kemerden büyük olmalý."
+            );
+
+            return false;
         }
 
-        if (beltWorldItem != null)
+        // Yeni açýlacak fiziksel yuvalarý kontrol et.
+        if (beltSockets == null || newCapacity > beltSockets.Length)
         {
-            foreach (Collider col in beltWorldItem.GetComponentsInChildren<Collider>())
-                col.enabled = false;
-
-            foreach (Outline outline in beltWorldItem.GetComponentsInChildren<Outline>())
-                outline.enabled = false;
+            Debug.LogWarning("Kemer yuvalarý eksik.");
+            return false;
         }
 
+        for (int i = 0; i < newCapacity; i++)
+        {
+            if (beltSockets[i] == null)
+            {
+                Debug.LogWarning(
+                    "BeltSocket" + (i + 1) + " atanmamýþ."
+                );
+
+                return false;
+            }
+        }
+
+        // Yeni kemeri kuþan.
+        equippedBelt = newBelt;
+
+        // Mevcut aletlere dokunmuyoruz.
+        // UI güncellemesini tetikle.
         OnRightHandChanged?.Invoke();
 
-        Debug.Log("El ve kemer aletleri deðiþtirildi.");
+        Debug.Log(
+            "Kemer yükseltildi: " +
+            newBelt.BeltName +
+            " | Kapasite: " + BeltSlotCount
+        );
+
+        return true;
     }
 
 }
