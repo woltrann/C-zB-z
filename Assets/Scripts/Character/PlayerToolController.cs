@@ -69,6 +69,9 @@ public class PlayerToolController : MonoBehaviour
 
     private void Update()
     {
+        if (InventoryUI.IsInputBlocked)
+            return;
+
         if (Input.GetKeyDown(KeyCode.G))
         {
             DropCurrentTool();

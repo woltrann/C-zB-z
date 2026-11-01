@@ -18,9 +18,12 @@ public class ItemFall : MonoBehaviour
     {
         if (IsInTargetLayer(collision.gameObject.layer))
         {
-            rb.isKinematic = true;
-            rb.linearVelocity = Vector3.zero;
-            rb.angularVelocity = Vector3.zero;
+            if (!rb.isKinematic)
+            {
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+                rb.isKinematic = true;
+            }
             coll.isTrigger = true;
         }
     }

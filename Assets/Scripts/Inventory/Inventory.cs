@@ -18,6 +18,7 @@ public class Inventory : MonoBehaviour
     public BagData EquippedBag => startingBag;
 
     public event Action OnInventoryChanged;
+    public void NotifyChanged() => OnInventoryChanged?.Invoke();
 
     private void Awake()
     {
@@ -94,6 +95,31 @@ public class Inventory : MonoBehaviour
             return false;
         }
 
+        // Reject the whole pickup before changing slots if it cannot fit.
+        // WorldItem stays in the world when AddItem returns false.
+        if (item.MaxStack <= 0)
+            return false;
+
+        int requiredSpace = amount;
+
+        for (int i = 0; i < slots.Count; i++)
+        {
+            InventorySlot slot = slots[i];
+            int space = slot.IsEmpty
+                ? item.MaxStack
+                : slot.item == item
+                    ? Mathf.Max(0, item.MaxStack - slot.amount)
+                    : 0;
+
+            requiredSpace -= Mathf.Min(space, requiredSpace);
+
+            if (requiredSpace == 0)
+                break;
+        }
+
+        if (requiredSpace > 0)
+            return false;
+
         int remainingAmount = amount;
 
         for (int i = 0; i < slots.Count; i++)
@@ -154,6 +180,39 @@ public class Inventory : MonoBehaviour
         );
 
         return false;
+    }
+
+    public bool TryDropSlot(int slotIndex, ItemData expectedItem, int amount)
+    {
+        if (slotIndex < 0 || slotIndex >= slots.Count || expectedItem == null || amount <= 0)
+            return false;
+
+        InventorySlot slot = slots[slotIndex];
+        if (slot.IsEmpty || slot.item != expectedItem || amount > slot.amount)
+            return false;
+
+        GameObject prefab = expectedItem.WorldPrefab;
+        if (prefab == null || prefab.GetComponent<WorldItem>() == null)
+        {
+            Debug.LogWarning("Inventory: World drop prefab missing for " + expectedItem.ItemName, this);
+            return false;
+        }
+
+        Vector3 position = transform.position + transform.forward * 2f + Vector3.up;
+        if (Physics.Raycast(position + Vector3.up * 2f, Vector3.down, out RaycastHit hit,
+            5f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            position = hit.point + Vector3.up * 0.5f;
+
+        GameObject droppedObject = Instantiate(prefab, position, prefab.transform.rotation);
+        droppedObject.GetComponent<WorldItem>().Initialize(expectedItem, amount);
+        foreach (Outline outline in droppedObject.GetComponentsInChildren<Outline>())
+            outline.enabled = false;
+
+        slot.amount -= amount;
+        if (slot.amount == 0)
+            slot.Clear();
+        OnInventoryChanged?.Invoke();
+        return true;
     }
 
     public bool RemoveItem(ItemData item, int amount)

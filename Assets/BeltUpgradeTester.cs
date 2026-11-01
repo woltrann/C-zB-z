@@ -12,6 +12,9 @@ public class BeltUpgradeTester : MonoBehaviour
 
     private void Update()
     {
+        if (InventoryUI.IsInputBlocked)
+            return;
+
         if (toolController == null)
             return;
 

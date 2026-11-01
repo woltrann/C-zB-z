@@ -93,7 +93,7 @@ public class Tree : NatureObject
             originalLocalEulerAngles;
 
         Sequence sequence =
-            DOTween.Sequence();
+            DOTween.Sequence().SetTarget(target);
 
         sequence.Append(
             target.DOLocalRotate(

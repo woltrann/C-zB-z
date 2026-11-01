@@ -21,6 +21,10 @@ public class ItemData : ScriptableObject
     [SerializeField] private ToolType toolType = ToolType.None;
     [SerializeField] private GameObject handPrefab;
 
+    [Header("World Drop")]
+    [SerializeField] private GameObject worldPrefab;
+
+    public GameObject WorldPrefab => worldPrefab;
     public ToolType ToolType => toolType;
     public GameObject HandPrefab => handPrefab;
 

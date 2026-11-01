@@ -17,3 +17,6 @@ MonoBehaviour:
   icon: {fileID: 1704787748, guid: 7e3a7289fee439b4b9dd7ecd2386c78b, type: 3}
   itemType: 3
   maxStack: 99
+  toolType: 0
+  handPrefab: {fileID: 0}
+  worldPrefab: {fileID: 4037543506332996687, guid: 614439a1191c1cc41853bddc0a143de7, type: 3}

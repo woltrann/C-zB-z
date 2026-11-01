@@ -37,6 +37,8 @@ public class ThirdPersonCamera : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (InventoryUI.IsInputBlocked)
+            return;
         if (target == null)
             return;
 

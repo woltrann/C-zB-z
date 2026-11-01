@@ -70,6 +70,13 @@ public class PlayerMovement : MonoBehaviour
 
     private void ReadInput()
     {
+        if (InventoryUI.IsInputBlocked)
+        {
+            input = Vector2.zero;
+            isRunning = false;
+            jumpPressed = false;
+            return;
+        }
         input.x = Input.GetAxisRaw("Horizontal");
         input.y = Input.GetAxisRaw("Vertical");
 

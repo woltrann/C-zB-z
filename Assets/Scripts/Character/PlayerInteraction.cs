@@ -18,23 +18,32 @@ public class PlayerInteraction : MonoBehaviour
     [Header("References")]
     [SerializeField] private PlayerToolController toolController;
 
+    public float InteractionDistance => interactionDistance;
+    public float InteractionAngle => interactionAngle;
+
     private NatureObject currentObject;
+    private PlayerStorageInteraction storageInteraction;
     private WorldItem currentSelectedItem;
 
     private readonly Collider[] nearbyObjects = new Collider[20];
+    private Collider[] nearbyItems = new Collider[32];
 
     private void Awake()
     {
+        storageInteraction = GetComponent<PlayerStorageInteraction>();
         if (playerTransform == null)
             playerTransform = transform;
     }
 
     private void Update()
     {
+        if (InventoryUI.IsInputBlocked)
+            return;
+
         DetectObject();
         UpdateSelectedItem();
 
-        if (Input.GetKeyDown(KeyCode.E))
+        if (Input.GetKeyDown(KeyCode.E) && (storageInteraction == null || (!storageInteraction.HasTarget && !storageInteraction.ConsumedInteraction)))
         {
             Interact();
         }
@@ -147,13 +156,26 @@ public class PlayerInteraction : MonoBehaviour
 
     private WorldItem FindBestWorldItem()
     {
-        Collider[] hits = Physics.OverlapSphere(
+        int hitCount = Physics.OverlapSphereNonAlloc(
             playerTransform.position,
             collectRadius,
+            nearbyItems,
             worldItemLayer
         );
 
-        if (hits.Length == 0)
+        // Grow only when saturated so crowded drop areas consider every item.
+        while (hitCount == nearbyItems.Length)
+        {
+            System.Array.Resize(ref nearbyItems, nearbyItems.Length * 2);
+            hitCount = Physics.OverlapSphereNonAlloc(
+                playerTransform.position,
+                collectRadius,
+                nearbyItems,
+                worldItemLayer
+            );
+        }
+
+        if (hitCount == 0)
             return null;
 
 
@@ -167,8 +189,9 @@ public class PlayerInteraction : MonoBehaviour
         forward.Normalize();
 
 
-        foreach (Collider hit in hits)
+        for (int i = 0; i < hitCount; i++)
         {
+            Collider hit = nearbyItems[i];
             WorldItem worldItem =
                 hit.GetComponentInParent<WorldItem>();
 
