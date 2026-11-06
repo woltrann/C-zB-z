@@ -22,10 +22,11 @@ public class PlayerInteraction : MonoBehaviour
     public float InteractionAngle => interactionAngle;
 
     private NatureObject currentObject;
+    private CraftStation highlightedStation;
     private PlayerStorageInteraction storageInteraction;
     private WorldItem currentSelectedItem;
 
-    private readonly Collider[] nearbyObjects = new Collider[20];
+    private Collider[] nearbyObjects = new Collider[20];
     private Collider[] nearbyItems = new Collider[32];
 
     private void Awake()
@@ -38,7 +39,10 @@ public class PlayerInteraction : MonoBehaviour
     private void Update()
     {
         if (InventoryUI.IsInputBlocked)
+        {
+            SetCraftTarget(null);
             return;
+        }
 
         DetectObject();
         UpdateSelectedItem();
@@ -57,13 +61,21 @@ public class PlayerInteraction : MonoBehaviour
     {
         currentObject = null;
 
+        float radius = Mathf.Max(interactionDistance, CraftStation.MaximumInteractionDistance);
         int objectCount = Physics.OverlapSphereNonAlloc(
             transform.position,
-            interactionDistance,
+            radius,
             nearbyObjects,
             interactionLayer,
             QueryTriggerInteraction.Ignore
         );
+
+        while (objectCount == nearbyObjects.Length)
+        {
+            System.Array.Resize(ref nearbyObjects, nearbyObjects.Length * 2);
+            objectCount = Physics.OverlapSphereNonAlloc(transform.position, radius, nearbyObjects,
+                interactionLayer, QueryTriggerInteraction.Ignore);
+        }
 
         float bestScore = -Mathf.Infinity;
 
@@ -76,15 +88,32 @@ public class PlayerInteraction : MonoBehaviour
 
             if (natureObject == null)
                 continue;
+            CraftStation station = natureObject as CraftStation;
+            if (station != null)
+            {
+                if (!station.isActiveAndEnabled || !station.IsInRange(transform)) continue;
+            }
+            else
+            {
+                MeshCollider meshCollider = collider as MeshCollider;
+                Vector3 closest = meshCollider != null && !meshCollider.convex
+                    ? collider.bounds.ClosestPoint(transform.position)
+                    : collider.ClosestPoint(transform.position);
+                if ((closest - transform.position).sqrMagnitude > interactionDistance * interactionDistance) continue;
+            }
 
-            Vector3 direction =
-                natureObject.transform.position -
-                transform.position;
+            Vector3 targetPoint = station != null
+                ? station.GetInteractionPoint(transform.position)
+                : natureObject.transform.position;
+            Vector3 direction = targetPoint - transform.position;
 
             direction.y = 0f;
 
             if (direction.sqrMagnitude < 0.01f)
-                continue;
+            {
+                if (station == null) continue;
+                direction = transform.forward;
+            }
 
             float distance = direction.magnitude;
 
@@ -106,7 +135,7 @@ public class PlayerInteraction : MonoBehaviour
                 1f - (angle / interactionAngle);
 
             float distanceScore =
-                1f - (distance / interactionDistance);
+                1f - (distance / (station != null ? station.InteractionDistance : interactionDistance));
 
             // Yöne daha fazla önem veriyoruz.
             float score =
@@ -119,7 +148,18 @@ public class PlayerInteraction : MonoBehaviour
                 currentObject = natureObject;
             }
         }
+        SetCraftTarget(currentObject as CraftStation);
     }
+
+    private void SetCraftTarget(CraftStation station)
+    {
+        if (highlightedStation == station) return;
+        if (highlightedStation != null) highlightedStation.SetHighlighted(false);
+        highlightedStation = station;
+        if (highlightedStation != null) highlightedStation.SetHighlighted(true);
+    }
+
+    private void OnDisable() => SetCraftTarget(null);
 
     private void Interact()
     {
@@ -141,7 +181,7 @@ public class PlayerInteraction : MonoBehaviour
         ToolType requiredTool =
             currentObject.RequiredTool;
 
-        if (!toolController.HasTool(requiredTool))
+        if (!(currentObject is CraftStation) && !toolController.HasTool(requiredTool))
         {
             Debug.Log(
                 requiredTool + " gerekli!"

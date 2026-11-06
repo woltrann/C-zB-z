@@ -282,6 +282,47 @@ public class Inventory : MonoBehaviour
         return totalAmount;
     }
 
+    // Preflight the entire refund before committing any slot changes.
+    public bool TryAddItems(IReadOnlyDictionary<ItemData, int> items)
+    {
+        if (items == null) return false;
+        if (items.Count == 0) return true;
+        var simulatedItems = new ItemData[slots.Count];
+        var simulatedAmounts = new int[slots.Count];
+        for (int i = 0; i < slots.Count; i++)
+        {
+            if (slots[i] == null || slots[i].IsEmpty) continue;
+            simulatedItems[i] = slots[i].item;
+            simulatedAmounts[i] = slots[i].amount;
+        }
+        foreach (var entry in items)
+        {
+            if (entry.Key == null || entry.Value <= 0 || entry.Key.MaxStack <= 0) return false;
+            int remaining = entry.Value;
+            for (int pass = 0; pass < 2 && remaining > 0; pass++)
+            for (int i = 0; i < slots.Count && remaining > 0; i++)
+            {
+                bool empty = simulatedItems[i] == null;
+                if (pass == 0 ? empty || simulatedItems[i] != entry.Key : !empty) continue;
+                int available = Mathf.Max(0, entry.Key.MaxStack - simulatedAmounts[i]);
+                int added = Mathf.Min(remaining, available);
+                if (added == 0) continue;
+                simulatedItems[i] = entry.Key;
+                simulatedAmounts[i] += added;
+                remaining -= added;
+            }
+            if (remaining != 0) return false;
+        }
+        for (int i = 0; i < slots.Count; i++)
+        {
+            if (slots[i] == null) slots[i] = new InventorySlot();
+            slots[i].item = simulatedItems[i];
+            slots[i].amount = simulatedAmounts[i];
+        }
+        OnInventoryChanged?.Invoke();
+        return true;
+    }
+
     public void ClearSlot(int slotIndex)
     {
         if (slotIndex < 0 || slotIndex >= slots.Count)
