@@ -76,7 +76,7 @@ public class InventoryUI : MonoBehaviour
         return inventory != null && index >= 0 && index < inventory.SlotCount ? inventory.Slots[index] : null;
     }
 
-    public static bool IsInputBlocked => interactionOwner != null || storageOwner != null;
+    public static bool IsInputBlocked => interactionOwner != null || storageOwner != null || CraftingUI.BlocksWorldInput;
 
     public bool TryBeginDrag(int slotIndex, ItemData item, PointerEventData eventData)
     {
