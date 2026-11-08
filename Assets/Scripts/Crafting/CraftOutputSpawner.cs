@@ -10,71 +10,61 @@ internal static class CraftOutputSpawner
         if (prefab == null || prefab.Item == null || amount <= 0 || outputPoint == null)
             return false;
 
+        var visuals = outputPoint.GetComponentInParent<CraftStation>();
+        if (visuals == null) { error = "CraftStation bağlantısı eksik."; return false; }
         var batch = new GameObject("CraftOutputBatch");
         batch.SetActive(false);
         var products = new List<WorldItem>(amount);
-        var occupied = new List<Bounds>(amount);
         var hits = new Collider[32];
         try
         {
+            Physics.SyncTransforms();
+            float bottom = visuals.StackTop(outputPoint.position.y + visuals.StackGap);
             for (int i = 0; i < amount; i++)
             {
                 WorldItem product = UnityEngine.Object.Instantiate(prefab, batch.transform);
                 products.Add(product);
-                product.transform.rotation = prefab.transform.rotation;
+                product.transform.rotation = outputPoint.rotation * prefab.transform.rotation;
                 Bounds bounds = GetBounds(product.gameObject);
-                Vector3 centerOffset = bounds.center - product.transform.position;
-                float step = Mathf.Max(spacing, Mathf.Max(bounds.size.x, bounds.size.z) + 0.12f);
-                bool placed = false;
-                for (int ring = 0; ring <= 8 && !placed; ring++)
+                Vector3 offset = bounds.center - product.transform.position;
+                Vector3 center = new Vector3(outputPoint.position.x, bottom + bounds.extents.y, outputPoint.position.z);
+                Vector3 extents = bounds.extents + Vector3.one * 0.01f;
+                Vector3 queryCenter = center;
+                Quaternion queryRotation = Quaternion.identity;
+                var box = product.GetComponent<BoxCollider>();
+                if (box != null)
                 {
-                    for (int z = -ring; z <= ring && !placed; z++)
-                    for (int x = -ring; x <= ring && !placed; x++)
-                    {
-                        if (ring > 0 && Mathf.Abs(x) != ring && Mathf.Abs(z) != ring) continue;
-                        Vector3 candidate = outputPoint.position + Vector3.right * (x * step) + Vector3.forward * (z * step);
-                        Vector3 rayOrigin = candidate + Vector3.up * 3f;
-                        if (!Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit ground, 8f,
-                            Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)) continue;
-                        if (ground.collider.GetComponentInParent<WorldItem>() != null ||
-                            ground.collider.GetComponentInParent<Inventory>() != null) continue;
-                        candidate.y = ground.point.y + bounds.extents.y - centerOffset.y + 0.06f;
-                        var proposed = new Bounds(candidate + centerOffset, bounds.size + Vector3.one * 0.04f);
-                        bool blocked = false;
-                        foreach (Bounds previous in occupied)
-                            if (previous.Intersects(proposed)) { blocked = true; break; }
-                        if (blocked) continue;
-                        int count = Physics.OverlapBoxNonAlloc(proposed.center, proposed.extents, hits,
-                            Quaternion.identity, Physics.AllLayers, QueryTriggerInteraction.Collide);
-                        if (count == hits.Length) continue;
-                        for (int h = 0; h < count; h++)
-                        {
-                            Collider hit = hits[h];
-                            if (hit != null && (!hit.isTrigger || hit.GetComponentInParent<WorldItem>() != null))
-                            { blocked = true; break; }
-                        }
-                        if (blocked) continue;
-                        product.transform.position = candidate;
-                        product.Initialize(prefab.Item, 1);
-                        foreach (Outline outline in product.GetComponentsInChildren<Outline>(true)) outline.enabled = false;
-                        occupied.Add(proposed);
-                        placed = true;
-                    }
+                    queryRotation = product.transform.rotation;
+                    extents = Vector3.Scale(box.size, product.transform.lossyScale) * 0.5f + Vector3.one * 0.01f;
+                    queryCenter = center - offset + queryRotation * Vector3.Scale(box.center, product.transform.lossyScale);
                 }
-                if (!placed)
+                int count = Physics.OverlapBoxNonAlloc(queryCenter, extents, hits, queryRotation,
+                    Physics.AllLayers, QueryTriggerInteraction.Collide);
+                if (count == hits.Length) throw new InvalidOperationException("Çıktı alanı çok kalabalık.");
+                for (int h = 0; h < count; h++)
+                    if (hits[h] != null && hits[h].GetComponentInParent<CraftStation>() != visuals &&
+                        (!hits[h].isTrigger || hits[h].GetComponentInParent<WorldItem>() != null))
+                        throw new InvalidOperationException("İstif noktasında engel var; çıktı noktası yüzeyin üstünde olmalı.");
+                product.transform.position = center - offset;
+                product.Initialize(prefab.Item, 1);
+                foreach (Outline outline in product.GetComponentsInChildren<Outline>(true)) outline.enabled = false;
+                var body = product.GetComponent<Rigidbody>();
+                if (body != null && visuals.KeepStackStable)
                 {
-                    error = "Çıkış çevresinde güvenli boş yer bulunamadı; malzemeler korundu.";
-                    Destroy(batch);
-                    return false;
+                    if (!body.isKinematic) { body.linearVelocity = Vector3.zero; body.angularVelocity = Vector3.zero; }
+                    body.isKinematic = true;
                 }
+                bottom = center.y + bounds.extents.y + visuals.StackGap;
             }
             batch.SetActive(true);
             foreach (WorldItem product in products)
-            {
                 if (product == null || !product.isActiveAndEnabled)
                     throw new InvalidOperationException("Ürün prefabı etkinleştirilemedi.");
+            foreach (WorldItem product in products)
+            {
+                product.transform.SetParent(null, true);
+                visuals.RegisterOutput(product);
             }
-            foreach (WorldItem product in products) product.transform.SetParent(null, true);
             Destroy(batch);
             error = null;
             return true;
@@ -89,7 +79,7 @@ internal static class CraftOutputSpawner
         }
     }
 
-    private static Bounds GetBounds(GameObject item)
+    internal static Bounds GetBounds(GameObject item)
     {
         Bounds result = new Bounds(item.transform.position, Vector3.one * 0.15f);
         bool found = false;
@@ -105,6 +95,15 @@ internal static class CraftOutputSpawner
                 if (!found) { result = new Bounds(world, Vector3.zero); found = true; }
                 else result.Encapsulate(world);
             }
+        }
+        foreach (BoxCollider box in item.GetComponentsInChildren<BoxCollider>(true))
+        for (int i = 0; i < 8; i++)
+        {
+            Vector3 corner = box.center + Vector3.Scale(box.size * 0.5f,
+                new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1));
+            Vector3 world = box.transform.TransformPoint(corner);
+            if (!found) { result = new Bounds(world, Vector3.zero); found = true; }
+            else result.Encapsulate(world);
         }
         return result;
     }
