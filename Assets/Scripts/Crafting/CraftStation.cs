@@ -9,7 +9,7 @@ public sealed class CraftStation : NatureObject
     [SerializeField] private string stationName = "Craft Station";
     [SerializeField, Min(0.1f)] private float interactionDistance = 2.5f;
     [SerializeField] private Transform outputPoint;
-    [SerializeField, Min(0.05f)] private float outputSpacing = 0.8f;
+    [SerializeField, HideInInspector] private float outputSpacing = 0.8f;
     [SerializeField] private ParticleSystem completionEffect;
     [SerializeField] private Outline outline;
     [Header("Recipes")]
@@ -32,6 +32,19 @@ public sealed class CraftStation : NatureObject
     public bool IsCrafting { get; private set; }
     public bool HasReservedMaterials => reserved.Count > 0;
     public float Progress { get; private set; }
+    public int CompletedBatches { get; private set; }
+    public int TotalBatches { get; private set; }
+    public int ReadyBatches
+    {
+        get
+        {
+            if (PreparedRecipe == null || !ValidateRecipe(preparedRecipeIndex, out _)) return 0;
+            int count = int.MaxValue;
+            foreach (CraftIngredient ingredient in PreparedRecipe.RequiredMaterials)
+                count = Mathf.Min(count, GetReserved(ingredient.Item) / ingredient.RequiredAmount);
+            return count;
+        }
+    }
     public string LastMessage { get; private set; }
     public event Action Changed;
     public event Action<float> ProgressChanged;
@@ -41,10 +54,12 @@ public sealed class CraftStation : NatureObject
         stations.Add(this);
         UpdateMaximumDistance();
         SetHighlighted(false);
+        SubscribeVisuals();
     }
 
     private void OnDisable()
     {
+        DisableVisuals();
         stations.Remove(this);
         UpdateMaximumDistance();
         SetHighlighted(false);
@@ -113,25 +128,15 @@ public sealed class CraftStation : NatureObject
     public bool ValidateRecipe(int index, out string error)
     {
         if (outputPoint == null) { error = "OutputPoint atanmamış."; return false; }
-        if (interactionDistance <= 0 || float.IsNaN(interactionDistance) || float.IsInfinity(interactionDistance) ||
-            outputSpacing <= 0 || float.IsNaN(outputSpacing) || float.IsInfinity(outputSpacing))
-        { error = "Etkileşim uzaklığı ve ürün aralığı pozitif ve sonlu olmalı."; return false; }
+        if (interactionDistance <= 0 || float.IsNaN(interactionDistance) || float.IsInfinity(interactionDistance))
+        { error = "Etkileşim uzaklığı pozitif ve sonlu olmalı."; return false; }
         if (index < 0 || index >= recipes.Count || recipes[index] == null)
         { error = "Geçerli bir tarif seç."; return false; }
-        return recipes[index].Validate(out error);
+        if (!recipes[index].Validate(out error)) return false;
+        return ValidateInputs(recipes[index], out error);
     }
 
-    public bool IsReady
-    {
-        get
-        {
-            CraftRecipe recipe = PreparedRecipe;
-            if (recipe == null || !ValidateRecipe(preparedRecipeIndex, out _)) return false;
-            foreach (CraftIngredient ingredient in recipe.RequiredMaterials)
-                if (GetReserved(ingredient.Item) != ingredient.RequiredAmount) return false;
-            return true;
-        }
-    }
+    public bool IsReady => ReadyBatches > 0;
 
     private bool CanChange(Inventory inventory, bool allowCrafting = false)
     {
@@ -163,7 +168,7 @@ public sealed class CraftStation : NatureObject
             if (ingredient.Item == item) { required = ingredient.RequiredAmount; break; }
         int previous = GetReserved(item);
         if (item == null || required == 0 || amount > required - previous || !inventory.HasItem(item, amount))
-            return Reject("Yeterli malzeme yok veya gereken miktar aşılmış.");
+            return Reject("Yeterli malzeme yok veya miktar sınırı aşılmış.");
         changing = true;
         try
         {
@@ -211,6 +216,10 @@ public sealed class CraftStation : NatureObject
     public bool TryCancel(Inventory inventory)
     {
         if (!CanChange(inventory, true)) return Reject("İptal işlemi şu anda yapılamıyor.");
+        if (production != null) StopCoroutine(production);
+        production = null;
+        IsCrafting = false;
+        Progress = 0;
         changing = true;
         try
         {
@@ -219,12 +228,10 @@ public sealed class CraftStation : NatureObject
             if (!inventory.TryAddItems(refund))
             {
                 foreach (var pair in refund) reserved.Add(pair.Key, pair.Value);
-                return Reject("İptal için envanterde yeterli yer yok. Malzemeler tezgahta korundu.");
+                LastMessage = "Üretim durduruldu. İade için envanterde yer yok; malzemeler tezgahta korundu.";
+                Changed?.Invoke();
+                return false;
             }
-            if (production != null) StopCoroutine(production);
-            production = null;
-            IsCrafting = false;
-            Progress = 0;
             preparedRecipeIndex = -1;
             reservationOwner = null;
         }
@@ -238,46 +245,197 @@ public sealed class CraftStation : NatureObject
     {
         if (!CanChange(inventory) || !IsReady) return Reject(IsCrafting ? "Üretim zaten sürüyor." : "Önce gereken malzemeleri ekle.");
         CraftRecipe recipe = PreparedRecipe;
+        var ingredients = new Dictionary<ItemData, int>();
+        foreach (CraftIngredient ingredient in recipe.RequiredMaterials)
+            ingredients.Add(ingredient.Item, ingredient.RequiredAmount);
+        TotalBatches = 1;
+        CompletedBatches = 0;
         IsCrafting = true;
         Progress = 0;
         LastMessage = "Üretiliyor...";
+        production = StartCoroutine(Produce(recipe.OutputWorldPrefab, recipe.OutputAmount, recipe.CraftDuration, ingredients));
         Changed?.Invoke();
-        // Snapshot output settings so an Inspector edit cannot change an in-flight job.
-        WorldItem prefab = recipe.OutputWorldPrefab;
-        int amount = recipe.OutputAmount;
-        if (recipe.CraftDuration == 0) Complete(prefab, amount);
-        else production = StartCoroutine(Produce(prefab, amount, recipe.CraftDuration));
         return true;
     }
 
-    private IEnumerator Produce(WorldItem prefab, int amount, float duration)
+    private IEnumerator Produce(WorldItem prefab, int amount, float duration, Dictionary<ItemData, int> ingredients)
     {
-        float elapsed = 0;
-        while (elapsed < duration)
+        while (CompletedBatches < TotalBatches)
         {
+            Progress = 0;
+            Changed?.Invoke();
+            // Yield even for instant recipes: large queues never block the main thread.
             yield return null;
-            elapsed += Time.deltaTime;
-            Progress = Mathf.Clamp01(elapsed / duration);
-            ProgressChanged?.Invoke(Progress);
+            float elapsed = 0;
+            while (elapsed < duration)
+            {
+                yield return null;
+                elapsed += Time.deltaTime;
+                Progress = Mathf.Clamp01(elapsed / duration);
+                ProgressChanged?.Invoke(Progress);
+            }
+            if (!Complete(prefab, amount, ingredients)) break;
+            CompletedBatches++;
+            Progress = 1;
+            Changed?.Invoke();
         }
         production = null;
-        Complete(prefab, amount);
+        IsCrafting = false;
+        Changed?.Invoke();
     }
 
-    private void Complete(WorldItem prefab, int amount)
+    private bool Complete(WorldItem prefab, int amount, Dictionary<ItemData, int> ingredients)
     {
         changing = true;
         bool spawned;
         string error;
         try
         {
+            foreach (var ingredient in ingredients)
+                if (GetReserved(ingredient.Key) < ingredient.Value)
+                { LastMessage = "Malzemeler değişti; üretim durduruldu."; return false; }
+            Physics.SyncTransforms();
             spawned = CraftOutputSpawner.TrySpawn(prefab, amount, outputPoint, outputSpacing, out error);
-            if (spawned) reserved.Clear();
+            if (spawned)
+                foreach (var ingredient in ingredients)
+                    SetReserved(ingredient.Key, GetReserved(ingredient.Key) - ingredient.Value);
         }
-        finally { changing = false; IsCrafting = false; production = null; }
-        Progress = spawned ? 1 : 0;
+        finally { changing = false; }
         LastMessage = spawned ? "Üretim tamamlandı! Ürünleri F ile toplayabilirsin." : error;
         if (spawned && completionEffect != null) completionEffect.Play();
-        Changed?.Invoke();
+        return spawned;
     }
+
+    private sealed class InputPreview
+    {
+        public ItemData item;
+        public GameObject prefab;
+        public readonly List<GameObject> instances = new List<GameObject>();
+    }
+
+    [Header("Input Placement")]
+    [SerializeField] private Transform inputPoint;
+    [SerializeField, Min(0)] private float inputSpacing = 0.5f;
+    [Header("Output Stack")]
+    [SerializeField, Min(0.03f)] private float stackGap = 0.05f;
+    [SerializeField] private bool keepStackStable = true;
+
+    private bool subscribed;
+    private readonly Dictionary<ItemData, InputPreview> inputPreviews = new Dictionary<ItemData, InputPreview>();
+    private readonly List<InputPreview> rowOrder = new List<InputPreview>();
+    private readonly List<WorldItem> outputs = new List<WorldItem>();
+    public float StackGap => Mathf.Max(0.03f, stackGap);
+    public bool KeepStackStable => keepStackStable;
+
+    private void SubscribeVisuals()
+    {
+        if (subscribed) return;
+        Changed += RefreshVisuals;
+        subscribed = true;
+        RefreshVisuals();
+    }
+
+    private void DisableVisuals()
+    {
+        if (subscribed) Changed -= RefreshVisuals;
+        subscribed = false;
+        HideAll();
+    }
+
+    private void OnDestroy()
+    {
+        foreach (var entry in inputPreviews.Values)
+            if (entry != null) foreach (var instance in entry.instances)
+                if (instance != null) Destroy(instance);
+    }
+
+    private InputPreview Find(ItemData item)
+    {
+        if (!inputPreviews.TryGetValue(item, out var entry))
+        {
+            entry = new InputPreview { item = item, prefab = item.WorldPrefab };
+            inputPreviews.Add(item, entry);
+        }
+        return entry;
+    }
+
+    public bool ValidateInputs(CraftRecipe recipe, out string error)
+    {
+        error = null;
+        if (inputPoint == null) return true;
+        if (inputSpacing < 0 || float.IsNaN(inputSpacing) || float.IsInfinity(inputSpacing))
+        { error = "Giriş aralığı geçersiz."; return false; }
+        foreach (var ingredient in recipe.RequiredMaterials)
+            if (ingredient.Item.WorldPrefab == null || ingredient.Item.WorldPrefab.GetComponentInChildren<MeshFilter>(true) == null)
+            { error = ingredient.Item.ItemName + " için ItemData World Prefab alanını ata."; return false; }
+        return true;
+    }
+
+    private void HideAll()
+    {
+        foreach (var entry in inputPreviews.Values)
+            if (entry != null) foreach (var instance in entry.instances)
+                if (instance != null) instance.SetActive(false);
+    }
+
+    private void RefreshVisuals()
+    {
+        HideAll();
+        if (inputPoint == null || PreparedRecipe == null) { rowOrder.Clear(); return; }
+        foreach (var ingredient in PreparedRecipe.RequiredMaterials) Find(ingredient.Item);
+        foreach (var entry in inputPreviews.Values)
+        {
+            if (entry == null) continue;
+            int wanted = GetReserved(entry.item);
+            int existing = rowOrder.FindAll(value => value == entry).Count;
+            while (existing > wanted) { rowOrder.RemoveAt(rowOrder.LastIndexOf(entry)); existing--; }
+            while (existing < wanted) { rowOrder.Add(entry); existing++; }
+        }
+        float cursor = 0;
+        var used = new Dictionary<InputPreview, int>();
+        foreach (var entry in rowOrder)
+        {
+            int index = used.TryGetValue(entry, out int count) ? count : 0;
+            used[entry] = index + 1;
+            if (entry.prefab == null) continue;
+            if (index == entry.instances.Count) entry.instances.Add(CreateRenderOnly(entry.prefab));
+            GameObject visual = entry.instances[index];
+            visual.transform.position = inputPoint.position + inputPoint.right * cursor;
+            visual.transform.rotation = inputPoint.rotation * entry.prefab.transform.rotation;
+            Vector3 size = entry.prefab.transform.lossyScale;
+            visual.transform.localScale = new Vector3(size.x / transform.lossyScale.x,
+                size.y / transform.lossyScale.y, size.z / transform.lossyScale.z);
+            visual.SetActive(true);
+            cursor += inputSpacing;
+        }
+    }
+
+    private GameObject CreateRenderOnly(GameObject prefab)
+    {
+        var root = new GameObject("Reserved Material Visual");
+        root.transform.SetParent(transform, false);
+        foreach (var filter in prefab.GetComponentsInChildren<MeshFilter>(true))
+        {
+            var renderer = filter.GetComponent<MeshRenderer>();
+            if (filter.sharedMesh == null || renderer == null) continue;
+            var part = new GameObject(filter.name, typeof(MeshFilter), typeof(MeshRenderer));
+            part.transform.SetParent(root.transform, false);
+            part.transform.localPosition = prefab.transform.InverseTransformPoint(filter.transform.position);
+            part.transform.localRotation = Quaternion.Inverse(prefab.transform.rotation) * filter.transform.rotation;
+            part.transform.localScale = new Vector3(filter.transform.lossyScale.x / prefab.transform.lossyScale.x,
+                filter.transform.lossyScale.y / prefab.transform.lossyScale.y, filter.transform.lossyScale.z / prefab.transform.lossyScale.z);
+            part.GetComponent<MeshFilter>().sharedMesh = filter.sharedMesh;
+            part.GetComponent<MeshRenderer>().sharedMaterials = renderer.sharedMaterials;
+        }
+        return root;
+    }
+
+    public float StackTop(float baseHeight)
+    {
+        outputs.RemoveAll(item => item == null || !item.gameObject.activeInHierarchy);
+        foreach (var item in outputs) baseHeight = Mathf.Max(baseHeight, CraftOutputSpawner.GetBounds(item.gameObject).max.y + StackGap);
+        return baseHeight;
+    }
+
+    public void RegisterOutput(WorldItem item) => outputs.Add(item);
 }

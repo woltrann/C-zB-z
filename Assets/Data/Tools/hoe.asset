@@ -10,12 +10,13 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7d3dfa1a53b92ff4f881257d4c5afb68, type: 3}
-  m_Name: shovel
+  m_Name: hoe
   m_EditorClassIdentifier: 
-  itemID: shovel
-  itemName: "K\xFCrek"
+  itemID: hoe
+  itemName: "\xC7apa"
   icon: {fileID: 21300000, guid: 0d9842191ce499044a1969adf42ac852, type: 3}
   itemType: 1
   maxStack: 1
-  toolType: 3
-  handPrefab: {fileID: 4993559892691306893, guid: 2de9f77a7c8e65d46a10cc8002680001, type: 3}
+  toolType: 4
+  handPrefab: {fileID: 507137016653121689, guid: 3b581137980697042b5d1c264b56e4c7, type: 3}
+  worldPrefab: {fileID: 507137016653121689, guid: 3b581137980697042b5d1c264b56e4c7, type: 3}

@@ -150,7 +150,31 @@ public sealed class CraftingUI : MonoBehaviour
         prepareButton.GetComponentInChildren<TMP_Text>(true).fontSize = 22;
         cancelButton.GetComponentInChildren<TMP_Text>(true).fontSize = 18;
         detailSummary.fontSize = 24;
+        var window = panelRoot.transform.Find("Window") as RectTransform;
+        window.sizeDelta = new Vector2(780, 520);
+        Layout("StationName", new Vector2(-15, 224));
+        Layout("Close", new Vector2(350, 224));
+        Layout("RecipesHeading", new Vector2(-252, 174));
+        Layout("RecipeName", new Vector2(125, 174));
+        Layout("OutputIcon", new Vector2(-70, 120));
+        Layout("OutputInfo", new Vector2(140, 120));
+        Layout("Recipes", new Vector2(-252, -8), new Vector2(240, 320));
+        Layout("Materials", new Vector2(125, -35), new Vector2(456, 230));
+        Layout("Progress", new Vector2(125, -162));
+        Layout("Prepare", new Vector2(130, -196));
+        Layout("Cancel", new Vector2(308, -196));
+        Layout("Controls", new Vector2(-252, -206));
+        Layout("Status", new Vector2(0, -238));
+        panelRoot.GetComponent<Image>().color = new Color(0, 0, 0, 0.03f);
         FitWindow();
+    }
+
+    private void Layout(string name, Vector2 position, Vector2? size = null)
+    {
+        var rect = panelRoot.transform.Find("Window/" + name) as RectTransform;
+        if (rect == null) return;
+        rect.anchoredPosition = position;
+        if (size.HasValue) rect.sizeDelta = size.Value;
     }
 
     private void OnRectTransformDimensionsChange() => FitWindow();
@@ -159,9 +183,12 @@ public sealed class CraftingUI : MonoBehaviour
     {
         if (panelRoot == null) return;
         RectTransform area = panelRoot.transform as RectTransform;
-        Transform window = panelRoot.transform.Find("Window");
+        RectTransform window = panelRoot.transform.Find("Window") as RectTransform;
         if (area == null || window == null || area.rect.width <= 0 || area.rect.height <= 0) return;
-        float scale = Mathf.Min(1, Mathf.Min((area.rect.width - 24) / 780f, (area.rect.height - 24) / 620f));
+        window.anchorMin = window.anchorMax = new Vector2(0, 0.5f);
+        window.pivot = new Vector2(0, 0.5f);
+        window.anchoredPosition = new Vector2(16, 0);
+        float scale = Mathf.Min(0.85f, Mathf.Min((area.rect.width * 0.35f - 20) / 780f, (area.rect.height - 24) / 520f));
         window.localScale = Vector3.one * Mathf.Max(0.05f, scale);
     }
 
@@ -206,11 +233,7 @@ public sealed class CraftingUI : MonoBehaviour
     private void Load(IngredientView row)
     {
         if (station == null || inventory == null || station.PreparedRecipe == null) return;
-        int required = 0;
-        foreach (CraftIngredient ingredient in station.PreparedRecipe.RequiredMaterials)
-            if (ingredient.Item == row.Item) { required = ingredient.RequiredAmount; break; }
-        int amount = Mathf.Min(required - station.GetReserved(row.Item), inventory.GetItemCount(row.Item));
-        Feedback(station.TryLoad(row.Item, amount, inventory));
+        Feedback(station.TryLoad(row.Item, 1, inventory));
     }
 
     private void Return(IngredientView row)
@@ -269,7 +292,7 @@ public sealed class CraftingUI : MonoBehaviour
                 "\nEnvanter: " + available;
             row.Add.gameObject.SetActive(preparing && loaded < required);
             row.Return.gameObject.SetActive(preparing && loaded > 0);
-            row.Add.interactable = !station.IsCrafting && row.Item != null && available > 0;
+            row.Add.interactable = !station.IsCrafting && row.Item != null && available > 0 && loaded < required;
             row.Return.interactable = !station.IsCrafting;
 
         }
@@ -278,7 +301,8 @@ public sealed class CraftingUI : MonoBehaviour
         prepareButton.GetComponentInChildren<TMP_Text>(true).text = preparing ? "Üret" : "Tarifi Seç";
         prepareButton.interactable = !station.IsCrafting;
         cancelButton.gameObject.SetActive(station.PreparedRecipeIndex >= 0);
-        cancelButton.interactable = !station.IsCrafting;
+        cancelButton.interactable = true;
+        cancelButton.GetComponentInChildren<TMP_Text>(true).text = station.IsCrafting ? "İptal Et" : "Seçimi İptal Et";
         progressFill.transform.parent.gameObject.SetActive(station.IsCrafting);
         string message = localError ? localMessage : station.IsCrafting ? "Üretiliyor..." :
             station.IsReady ? "Üretime hazır" : station.LastMessage;
