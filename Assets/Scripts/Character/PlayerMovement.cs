@@ -11,18 +11,10 @@ public class PlayerMovement : MonoBehaviour
     [SerializeField] private float rotationSpeed = 10f;
     private Vector3 moveDirection;
 
-    [Header("Jump")]
-    [SerializeField] private float jumpForce = 7f;
-    [SerializeField] private float groundCheckRadius = 0.25f;
-    [SerializeField] private float groundCheckDistance = 0.1f;
-    [SerializeField] private LayerMask groundLayer;
-
     [Header("References")]
     [SerializeField] private Transform cameraTransform;
-    [SerializeField] private Transform groundCheck;
 
     public Rigidbody rb;
-    private CapsuleCollider capsule;
     public Animator animator;
     public bool isBlocked = false;
 
@@ -30,16 +22,10 @@ public class PlayerMovement : MonoBehaviour
     private Vector2 input;
 
     private bool isRunning;
-    private bool jumpPressed;
-    private bool isGrounded;
 
     public float currentSpeed;
     public bool IsMoving =>
     new Vector2(input.x, input.y).sqrMagnitude > 0.01f;
-
-
-    private readonly Collider[] groundHits = new Collider[8];
-
 
 
     #region Unity Methods
@@ -47,7 +33,6 @@ public class PlayerMovement : MonoBehaviour
     private void Awake()
     {
         rb = GetComponent<Rigidbody>();
-        capsule = GetComponent<CapsuleCollider>();
         animator = GetComponent<Animator>();
     }
 
@@ -74,7 +59,6 @@ public class PlayerMovement : MonoBehaviour
         {
             input = Vector2.zero;
             isRunning = false;
-            jumpPressed = false;
             return;
         }
         input.x = Input.GetAxisRaw("Horizontal");
@@ -83,13 +67,6 @@ public class PlayerMovement : MonoBehaviour
         input = Vector2.ClampMagnitude(input, 1f);
 
         isRunning = Input.GetKey(KeyCode.LeftShift);
-
-        if (Input.GetKeyDown(KeyCode.Space))
-        {
-            if (isBlocked) return;
-            jumpPressed = true;
-
-        }
     }
     private void Move()
     {
@@ -171,8 +148,6 @@ public class PlayerMovement : MonoBehaviour
             0.1f,
             Time.deltaTime
         );
-
-        animator.SetBool("Grounded", isGrounded);
     }
 
 
